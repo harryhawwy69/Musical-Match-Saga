@@ -1,9 +1,11 @@
 name: Deploy static site to GitHub Pages
 
 on:
-  push:
-    branches:
-      - main
+  # Deploy only after the Test workflow succeeds for a push to main, so each
+  # commit runs the tests once per Node version instead of twice.
+  workflow_run:
+    workflows: ["Test"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -16,32 +18,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [24, 26]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run ESLint
-        run: npm run lint
-
-      - name: Run tests
-        run: npx jest --ci --coverage
-
   deploy:
-    needs: deploy-test
+    # The Test run must have passed, and only a push to main deploys; a manual
+    # dispatch skips that check.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -50,6 +34,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # A workflow_run deploy must publish the commit the tests ran on.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
